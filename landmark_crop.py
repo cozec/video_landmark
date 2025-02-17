@@ -5,7 +5,6 @@ from typing import Tuple, Optional, List
 import os
 from tqdm import tqdm
 import argparse
-import ffmpeg
 import shutil
 import subprocess
 
@@ -111,30 +110,46 @@ def draw_landmarks(image: np.ndarray, landmarks: np.ndarray) -> np.ndarray:
         cv2.circle(img_copy, (int(x), int(y)), 1, (0, 255, 0), -1)
     return img_copy
 
+def check_ffmpeg_installed():
+    """
+    Check if ffmpeg is installed and accessible
+    Returns True if ffmpeg is found, False otherwise
+    """
+    try:
+        subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+        return True
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+
 def add_audio_to_video(video_path: str, audio_path: str, output_path: str):
     """
-    Add audio to video using ffmpeg
+    Add audio to video using ffmpeg command line
     """
+    if not check_ffmpeg_installed():
+        print("Warning: ffmpeg not found. Audio will not be added.")
+        shutil.move(video_path, output_path)
+        return
+
     temp_path = output_path + '.temp.mp4'
     shutil.move(video_path, temp_path)
     
     try:
-        stream = ffmpeg.input(temp_path)
-        audio = ffmpeg.input(audio_path).audio
-        
-        # Combine video and audio
-        stream = ffmpeg.output(
-            stream,
-            audio,
-            output_path,
-            vcodec='libx264',
-            acodec='aac',
-            **{'b:a': '192k'}
-        )
-        
-        # Overwrite output and hide ffmpeg output
-        stream = stream.overwrite_output()
-        ffmpeg.run(stream, capture_stdout=True, capture_stderr=True)
+        cmd = [
+            'ffmpeg',
+            '-i', temp_path,
+            '-i', audio_path,
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-map', '0:v:0',
+            '-map', '1:a:0?',  # The ? makes audio stream optional
+            '-shortest',  # End when shortest input ends
+            '-y',
+            output_path
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: Failed to add audio: {e.stderr.decode()}")
+        shutil.move(temp_path, output_path)
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -232,44 +247,24 @@ def process_video(input_video: str,
     
     # Add audio using ffmpeg
     print("Adding audio to output videos...")
-    try:
-        # For cropped video
-        cmd = [
-            'ffmpeg', '-i', temp_crop,
-            '-i', input_video,
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-map', '0:v:0',
-            '-map', '1:a:0',
-            '-y',
-            output_video
-        ]
-        subprocess.run(cmd, check=True, capture_output=True)
-        
-        # For landmark video
-        cmd = [
-            'ffmpeg', '-i', temp_landmarks,
-            '-i', input_video,
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-map', '0:v:0',
-            '-map', '1:a:0',
-            '-y',
-            landmark_output
-        ]
-        subprocess.run(cmd, check=True, capture_output=True)
-    except Exception as e:
-        print(f"Warning: Could not add audio to output videos: {str(e)}")
-        # If audio addition fails, at least save the video without audio
-        if os.path.exists(temp_crop):
-            shutil.move(temp_crop, output_video)
-        if os.path.exists(temp_landmarks):
-            shutil.move(temp_landmarks, landmark_output)
-    finally:
-        # Clean up temporary files
-        for temp_file in [temp_crop, temp_landmarks]:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
+    
+    # For cropped video
+    add_audio_to_video(temp_crop, input_video, output_video)
+    
+    # For landmark video
+    add_audio_to_video(temp_landmarks, input_video, landmark_output)
+    
+    # Clean up temporary files
+    for temp_file in [temp_crop, temp_landmarks]:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+    
+    if not check_ffmpeg_installed():
+        print("\nNote: Videos were created without audio because ffmpeg is not installed.")
+        print("To add audio to your videos, please:")
+        print("1. Install ffmpeg (https://ffmpeg.org/download.html)")
+        print("2. Add ffmpeg to your system PATH")
+        print("3. Run this script again")
     
     print(f"Created cropped video: {output_video}")
     print(f"Created landmark video: {landmark_output}")
