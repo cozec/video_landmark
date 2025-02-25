@@ -1,6 +1,6 @@
 # Video Landmark Processing
 
-This project provides tools for processing videos to detect and work with facial landmarks.
+This project provides tools for processing videos to detect and work with facial landmarks. Example vidoes contain one speaker saying "Van" and "Fan". The output video contains the landmarks of the speaker saying "Fan" side to side with the landmarks of the speaker saying "Van".
 
 ## Features
 
